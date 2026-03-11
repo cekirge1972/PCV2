@@ -337,7 +337,7 @@ USAGE_NOTIFIERS = [30, 60, 120, 300]  # seconds before limit
 
 ## 📄 License
 
-Specify your project license here.
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
 
 ## 👤 Author
 
