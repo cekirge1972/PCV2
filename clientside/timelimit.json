@@ -21,7 +21,7 @@
     "Monday": 3600,
     "Tuesday": 3600,
     "Wednesday": 3600,
-    "Thursday": 3600,
+    "Thursday": 120,
     "Friday": 3600,
     "Saturday": 60,
     "Sunday": 3600

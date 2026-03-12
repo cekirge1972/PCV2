@@ -19,7 +19,7 @@ EXCEPTION_FILE = "exceptionaltime.json"
 USED_EXCEPTIONS_FILE = "used_exceptions.json"
 CHECK_INTERVAL = 5  # seconds
 load_dotenv()
-HASS_URL = os.getenv("HASS_URL")
+HASS_URL = os.getenv("HASS_URL","http://homeassistant.local:8123")
 TOKEN = os.getenv("HASS_TOKEN")
 SAFETY_SLEEP = 60
 
@@ -65,8 +65,8 @@ def save_usage(usage):
 
 def shutdown():
     import os
-    os.system('cls') # I wrote cls because I don't want the computer to shutdown when I am testing :)
-
+    os.system('shutdown /s /t 0 /F')
+    
 def trigger_tag_event(tag_id): 
     # We run this in a function to be threaded
     def send_request():
