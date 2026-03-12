@@ -546,4 +546,4 @@ if __name__ == "__main__":
     print("  GET    /api/status")
     print("  GET    /api/config")
     print("  POST   /api/config")
-    app.run(debug=True, host="0.0.0.0", port=5005)
+    app.run(debug=True, host="0.0.0.0", port=5000)

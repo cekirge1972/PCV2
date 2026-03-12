@@ -21,7 +21,7 @@ CHECK_INTERVAL = 5  # seconds
 load_dotenv()
 HASS_URL = os.getenv("HASS_URL","http://homeassistant.local:8123")
 TOKEN = os.getenv("HASS_TOKEN")
-SAFETY_SLEEP = 60
+SAFETY_SLEEP = 3
 
 
 USED_EXCEPTIONS=[]
@@ -65,8 +65,9 @@ def save_usage(usage):
 
 def shutdown():
     import os
-    os.system('shutdown /s /t 0 /F')
-    
+    print("Time exceeded for overall usage. Shutting down the computer.")
+    os.system('shutdown /s /t 0 /F') 
+
 def trigger_tag_event(tag_id): 
     # We run this in a function to be threaded
     def send_request():
@@ -109,69 +110,97 @@ def notify(limit,usage,name=None):
 
 def check_exception(name,default_limit,default_usage,today):
     exceptions = load_exceptions()
-    if today in exceptions:
-        if name in exceptions.get(today):
-            try: lm = exceptions.get(today).get(name)[-1]
-            except: lm = []
-            try: t=exceptions.get(today).get(name)[-1][0]
-            except: return default_limit,None
-            try:reason = exceptions.get(today).get(name)[-1][1]
-            except: reason = None
-            if reason == "null": reason = None
-            if name == "OVERALL":txt_name = "Bilgisayar kullanımı için"
-            else: txt_name = f"{name} adlı uygulama için"
-            if type(t) == int:
-                if t % 60 == 0:t_txt = f"{t/60} dakika"
-                elif t > 60 : t_txt = f"{t//60} dakika {t%60} saniye"
-                elif t < 60: t_txt = f"{t} saniye"
+    if today in exceptions and name in exceptions.get(today, {}):
+        entries = exceptions.get(today).get(name, [])
+        base_limit = default_limit
+        last_reason = None
+        if name == "OVERALL":
+            txt_name = "Bilgisayar kullanımı için"
+        else:
+            txt_name = f"{name} adlı uygulama için"
 
-                if abs(t) == t:
-                    exception_id = f"{today}_{name}_{t}"
-                    if exception_id not in USED_EXCEPTIONS:
+        for entry in entries:
+            try:
+                t = entry[0]
+            except Exception:
+                continue
+            try:
+                reason = entry[1]
+            except Exception:
+                reason = None
+            if reason == "null":
+                reason = None
+
+            # Integer adjustments (add/subtract)
+            if type(t) == int:
+                exception_id = f"{today}_{name}_{t}"
+                if exception_id not in USED_EXCEPTIONS:
+                    if t >= 0:
+                        if t % 60 == 0:
+                            t_txt = f"{t/60} dakika"
+                        elif t > 60:
+                            t_txt = f"{t//60} dakika {t%60} saniye"
+                        else:
+                            t_txt = f"{t} saniye"
                         toaster = ToastNotifier()
                         toaster.show_toast(
                             "HASSS Agent",
                             f"{txt_name} {t_txt} eklendi.",
                             duration=7,
-                            threaded=True
+                            threaded=True,
                         )
                         print(f"Sent notification for {name} for exceptional time addition of {t}")
-                        USED_EXCEPTIONS.append(exception_id)
-                        save_used_exceptions(USED_EXCEPTIONS)
-                    return default_limit + t,reason
-                else:
-                    exception_id = f"{today}_{name}_{t}"
-                    if exception_id not in USED_EXCEPTIONS:
+                    else:
+                        if abs(t) % 60 == 0:
+                            t_txt = f"{abs(t)/60} dakika"
+                        elif abs(t) > 60:
+                            t_txt = f"{abs(t)//60} dakika {abs(t)%60} saniye"
+                        else:
+                            t_txt = f"{abs(t)} saniye"
                         toaster = ToastNotifier()
                         toaster.show_toast(
                             "HASSS Agent",
                             f"{txt_name} {t_txt} azaltıldı.",
                             duration=7,
-                            threaded=True
+                            threaded=True,
                         )
                         print(f"Sent notification for {name} for exceptional time substriction of {t}")
-                        USED_EXCEPTIONS.append(exception_id)
-                        save_used_exceptions(USED_EXCEPTIONS)
-                    return default_limit + t,reason
+
+                    USED_EXCEPTIONS.append(exception_id)
+                    save_used_exceptions(USED_EXCEPTIONS)
+
+                base_limit += t
+                last_reason = reason
             else:
-                t = int(t) 
-                exception_id = f'{today}_{name}_"{t}"'
+                # Try to interpret non-int as a set-limit (string numbers)
+                try:
+                    t_int = int(t)
+                except Exception:
+                    continue
+                exception_id = f"{today}_{name}_{t_int}"
                 if exception_id not in USED_EXCEPTIONS:
-                    if t % 60 == 0:t_txt = f"{t/60} dakika"
-                    elif t > 60 : t_txt = f"{t//60} dakika {t%60} saniye"
-                    elif t < 60: t_txt = f"{t} saniye"
+                    if t_int % 60 == 0:
+                        t_txt = f"{t_int//60} dakika"
+                    elif t_int > 60:
+                        t_txt = f"{t_int//60} dakika {t_int%60} saniye"
+                    else:
+                        t_txt = f"{t_int} saniye"
                     toaster = ToastNotifier()
                     toaster.show_toast(
                         "HASSS Agent",
                         f"{txt_name} süre {t_txt} yapıldı.",
                         duration=7,
-                        threaded=True
+                        threaded=True,
                     )
-                    print(f"Sent notification for {name} for exceptional time set of {t}")
+                    print(f"Sent notification for {name} for exceptional time set of {t_int}")
                     USED_EXCEPTIONS.append(exception_id)
                     save_used_exceptions(USED_EXCEPTIONS)
-                return t,reason
-    return default_limit,None
+
+                base_limit = t_int
+                last_reason = reason
+
+        return base_limit, last_reason
+    return default_limit, None
 
 
 def main():
@@ -204,28 +233,34 @@ def main():
         for name,procs in found_processes.items():
             if today not in list(usage):
                 usage[today] = {}
-            app_lim = limits.get(name).get(dow,0)
-            if name in list(usage.get(today)):
-                app_usg = usage.get(today).get(name)
-                exception_lim, reason = check_exception(name,app_lim,app_usg,today)
-                print(exception_lim, reason)
-                if exception_lim != app_lim:app_lim = exception_lim
-                if app_lim <= app_usg and exception_lim == app_lim:
-                    
-                    if name != "OVERALL":
-                        for proc in procs:
-                            print(f"Time exceeded for {name} PID : {proc.info['pid']}. Terminating.")
-                            try:
-                                proc.kill()
-                            except:pass
-                            if proc.info['name'] not in killed:
-                                killed.append(proc.info['name'])
-                    else:
-                        shutdown()
-                        break
+            # Safely get the configured limit for the name (handles missing entries)
+            name_limits = limits.get(name) or {}
+            app_lim = name_limits.get(dow, 0)
+
+            # Always treat missing usage as 0 so exceptions (including OVERALL) apply immediately
+            app_usg = usage.get(today, {}).get(name, 0)
+
+            exception_lim, reason = check_exception(name, app_lim, app_usg, today)
+            print(exception_lim, reason)
+            if exception_lim != app_lim:
+                app_lim = exception_lim
+
+            if app_lim <= app_usg:
+                if name != "OVERALL":
+                    for proc in procs:
+                        print(f"Time exceeded for {name} PID : {proc.info['pid']}. Terminating.")
+                        try:
+                            proc.kill()
+                        except:
+                            pass
+                        if proc.info['name'] not in killed:
+                            killed.append(proc.info['name'])
                 else:
-                    print(f"Time checked for : {name}. Usage : {app_usg}/{app_lim}")
-                    notify(app_lim,app_usg,name)
+                    shutdown()
+                    break
+            else:
+                print(f"Time checked for : {name}. Usage : {app_usg}/{app_lim}")
+                notify(app_lim, app_usg, name)
         print("Sleeping for 5 seconds.")
         time.sleep(CHECK_INTERVAL)
         for name,proc in found_processes.items():

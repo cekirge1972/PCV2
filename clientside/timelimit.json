@@ -34,5 +34,23 @@
     "Friday": 3600,
     "Saturday": 3600,
     "Sunday": 3600
+  },
+  "chrome.exe": {
+    "Monday": 3600,
+    "Tuesday": 3600,
+    "Wednesday": 3600,
+    "Thursday": 3600,
+    "Friday": 3600,
+    "Saturday": 3600,
+    "Sunday": 3600
+  },
+  "de": {
+    "Monday": 3600,
+    "Tuesday": 3600,
+    "Wednesday": 3600,
+    "Thursday": 3600,
+    "Friday": 3600,
+    "Saturday": 3600,
+    "Sunday": 3600
   }
 }

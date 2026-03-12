@@ -21,10 +21,10 @@ app = Flask(__name__)
 log.setLevel(logging.ERROR) """
 
 # Configuration
-PRIMARY_API_URL = 'http://127.0.0.1:5005/api'
+PRIMARY_API_URL = 'http://127.0.0.1:5000/api'
 QUEUE_DB = 'request_queue.db'
-SYNC_INTERVAL = 5  # seconds
-REQUEST_TIMEOUT = 1.5  # seconds (very short - if it takes longer, assume offline)
+SYNC_INTERVAL = 10  # seconds
+REQUEST_TIMEOUT = 3.0  # seconds (increased to allow slightly slower responses)
 
 # Request queue for async syncing
 sync_queue = Queue()
@@ -109,12 +109,22 @@ def mark_queued_request_done(request_id: int):
     except sqlite3.OperationalError as e:
         print(f"[ERROR] Failed to mark done: {e}")
 
-def mark_queued_request_failed(request_id: int):
-    """Mark queued request as failed."""
+def mark_queued_request_failed(request_id: int, max_retries: int = 3):
+    """Mark queued request as failed, or retry if under max_retries."""
     try:
         conn = sqlite3.connect(QUEUE_DB, timeout=10)
         c = conn.cursor()
-        c.execute('UPDATE request_queue SET retry_count = retry_count + 1, status = ? WHERE id = ?', ('failed', request_id))
+        c.execute('SELECT retry_count FROM request_queue WHERE id = ?', (request_id,))
+        row = c.fetchone()
+        
+        if row and row[0] < max_retries:
+            # Reset to pending for retry
+            c.execute('UPDATE request_queue SET retry_count = retry_count + 1, status = ? WHERE id = ?', 
+                     ('pending', request_id))
+        else:
+            # Give up after max retries
+            c.execute('UPDATE request_queue SET retry_count = retry_count + 1, status = ? WHERE id = ?', 
+                     ('failed', request_id))
         conn.commit()
         conn.close()
     except sqlite3.OperationalError as e:
@@ -184,11 +194,26 @@ def check_primary_alive():
     if current_time - _primary_status_cache['last_check'] < _primary_status_cache['cache_ttl']:
         return _primary_status_cache['is_alive']
     
-    try:
-        response = requests.get(f'{PRIMARY_API_URL}/status', timeout=REQUEST_TIMEOUT)
-        is_alive = response.status_code == 200
-    except Exception as e:
-        is_alive = False
+    # Try the well-known status endpoint first
+    is_alive = False
+    probe_urls = [f'{PRIMARY_API_URL}/status', PRIMARY_API_URL]
+    last_exception = None
+    for url in probe_urls:
+        try:
+            response = requests.get(url, timeout=REQUEST_TIMEOUT)
+            # Consider alive if we get an HTTP 200
+            if response.status_code == 200:
+                is_alive = True
+                break
+            else:
+                # Log non-200 for diagnosis
+                print(f"[CHECK] Probe to {url} returned status {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            last_exception = e
+            # Keep trying other probe urls
+            # Only verbose-print when debugging
+            print(f"[CHECK] Probe to {url} failed: {type(e).__name__}: {e}")
+            continue
     
     # Update cache
     _primary_status_cache['last_check'] = current_time
@@ -355,6 +380,12 @@ def create_exception():
 @app.route("/api/exceptions/<date>/<app_name>", methods=["DELETE"])
 def delete_exception(date, app_name):
     return proxy_request('DELETE', f'/exceptions/{date}/{app_name}', return_queued=True)
+
+
+@app.route("/api/exceptions/<date>/<app_name>/<int:index>", methods=["DELETE"])
+def delete_exception_transaction_proxy(date, app_name, index):
+    """Proxy delete for a specific exception transaction (queues when primary offline)."""
+    return proxy_request('DELETE', f'/exceptions/{date}/{app_name}/{index}', return_queued=True)
 
 # USAGE ENDPOINTS
 @app.route("/api/usage", methods=["GET"])
@@ -572,4 +603,4 @@ if __name__ == "__main__":
     print("  Clear Queue: POST /api/server/queue/clear")
     print("\nStarting server...\n")
     
-    app.run(debug=False, host="0.0.0.0", port=5000)
+    app.run(debug=False, host="0.0.0.0", port=5035)

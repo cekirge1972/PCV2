@@ -9,3 +9,10 @@ __pycache__/
 *.db
 
 .DS_Store
+
+# PyInstaller
+build/
+dist/
+*.spec
+*.manifest
+*.exe
