@@ -543,11 +543,12 @@ def refresh_cache():
     if not check_primary_alive():
         return
     
+    today = datetime.now().strftime("%Y-%m-%d")
     # List of endpoints to cache
     endpoints_to_cache = [
         '/limits',
-        '/exceptions/2026-01-17',  # Today's exceptions - update date dynamically
-        '/usage/2026-01-17',  # Today's usage
+        f'/exceptions/{today}',
+        f'/usage/{today}',
         '/config',
         '/status'
     ]

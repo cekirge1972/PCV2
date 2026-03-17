@@ -98,7 +98,7 @@ def notify(limit,usage,name=None):
         else:
             whole_txt = f"{name} adlı uygulama için kalan süre"
         if limit - usage < 60: txt = f"{limit-usage} saniye"
-        elif limit - usage % 60 == 0: txt = f"{(limit-usage)/60} dakika"
+        elif (limit - usage) % 60 == 0: txt = f"{(limit-usage)//60} dakika"
         else:txt = f"{(limit - usage) // 60} dakika {(limit - usage) % 60} saniye"
         toaster.show_toast(
             "HASSS Agent",
@@ -137,7 +137,7 @@ def check_exception(name,default_limit,default_usage,today):
                 if exception_id not in USED_EXCEPTIONS:
                     if t >= 0:
                         if t % 60 == 0:
-                            t_txt = f"{t/60} dakika"
+                            t_txt = f"{t//60} dakika"
                         elif t > 60:
                             t_txt = f"{t//60} dakika {t%60} saniye"
                         else:
@@ -152,7 +152,7 @@ def check_exception(name,default_limit,default_usage,today):
                         print(f"Sent notification for {name} for exceptional time addition of {t}")
                     else:
                         if abs(t) % 60 == 0:
-                            t_txt = f"{abs(t)/60} dakika"
+                            t_txt = f"{abs(t)//60} dakika"
                         elif abs(t) > 60:
                             t_txt = f"{abs(t)//60} dakika {abs(t)%60} saniye"
                         else:
