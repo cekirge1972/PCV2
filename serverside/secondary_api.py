@@ -13,18 +13,53 @@ import requests
 import logging
 from queue import Queue
 from typing import Dict, Any
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 app = Flask(__name__)
+
+# Enable gzip compression
+try:
+    from flask_compress import Compress
+    Compress(app)
+except ImportError:
+    print("[WARNING] flask-compress not installed. Compression disabled.")
+
+# Session with connection pooling and retries for primary API requests
+def create_session():
+    """Create a requests session with connection pooling and retry strategy."""
+    session = requests.Session()
+    
+    # Retry strategy for failed connections
+    retry_strategy = Retry(
+        total=1,  # Only 1 retry to keep latency low over network
+        backoff_factor=0.1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        method_whitelist=["HEAD", "GET", "OPTIONS", "POST", "PUT", "DELETE"]
+    )
+    
+    adapter = HTTPAdapter(
+        max_retries=retry_strategy,
+        pool_connections=10,  # Connection pooling
+        pool_maxsize=10       # Maximum size of pool
+    )
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    
+    return session
+
+# Global session for reuse
+PRIMARY_API_SESSION = create_session()
 
 # Disable Flask's verbose logging
 """ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR) """
 
 # Configuration
-PRIMARY_API_URL = 'http://127.0.0.1:5000/api'
+PRIMARY_API_URL = 'http://serhan-hn85:5000/api'
 QUEUE_DB = 'request_queue.db'
 SYNC_INTERVAL = 10  # seconds
-REQUEST_TIMEOUT = 3.0  # seconds (increased to allow slightly slower responses)
+REQUEST_TIMEOUT = 5.0  # seconds (allows for inter-machine latency)
 
 # Request queue for async syncing
 sync_queue = Queue()
