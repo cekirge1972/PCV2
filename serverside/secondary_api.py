@@ -34,6 +34,7 @@ def create_session():
     # Retry strategy for failed connections
     retry_strategy = Retry(
         total=1,  # Only 1 retry to keep latency low over network
+        connect=0,  # Don't retry on connection errors (offline primary) - avoids doubling the timeout
         backoff_factor=0.1,
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["HEAD", "GET", "OPTIONS", "POST", "PUT", "DELETE"]
@@ -222,6 +223,15 @@ def get_cached_endpoint_data(endpoint: str):
 # PRIMARY API COMMUNICATION
 # ============================================================================
 
+def _update_primary_status(is_alive: bool):
+    """Update the cached primary API liveness status."""
+    prev = _primary_status_cache.get('last_status')
+    _primary_status_cache['last_check'] = time.time()
+    _primary_status_cache['is_alive'] = is_alive
+    if is_alive != prev:
+        print(f"[CHECK] Primary API is now {'ONLINE' if is_alive else 'OFFLINE'}")
+        _primary_status_cache['last_status'] = is_alive
+
 def check_primary_alive():
     """Check if primary API is available (with caching to reduce spam)."""
     global _primary_status_cache
@@ -253,16 +263,7 @@ def check_primary_alive():
             continue
     
     # Update cache
-    _primary_status_cache['last_check'] = current_time
-    _primary_status_cache['is_alive'] = is_alive
-    
-    # Only print if status changed
-    if is_alive != _primary_status_cache['last_status']:
-        if is_alive:
-            print("[CHECK] Primary API is now ONLINE")
-        else:
-            print("[CHECK] Primary API is now OFFLINE")
-        _primary_status_cache['last_status'] = is_alive
+    _update_primary_status(is_alive)
     
     return is_alive
 
@@ -326,12 +327,17 @@ def add_cors_headers(response):
 
 def proxy_request(method: str, endpoint: str, data: Dict = None, return_queued: bool = False):
     """Generic proxy request handler."""
-    # Try the real request first to avoid an extra network roundtrip per call.
-    success, response, status_code = forward_to_primary(method, endpoint, data)
+    # Skip the expensive forward attempt when the primary is known to be offline.
+    # check_primary_alive() returns instantly from cache within its TTL window,
+    # so this avoids blocking on REQUEST_TIMEOUT for every request while offline.
+    primary_alive = check_primary_alive()
+
+    success, response, status_code = False, None, None
+    if primary_alive:
+        success, response, status_code = forward_to_primary(method, endpoint, data)
 
     if success:
-        _primary_status_cache['last_check'] = time.time()
-        _primary_status_cache['is_alive'] = True
+        _update_primary_status(True)
 
         # Cache successful GET responses
         if method == 'GET':
@@ -341,14 +347,14 @@ def proxy_request(method: str, endpoint: str, data: Dict = None, return_queued: 
     # Primary is reachable but returned an error (4xx/5xx) - propagate the error
     # rather than queuing, since the primary explicitly rejected the request.
     if status_code is not None:
-        _primary_status_cache['last_check'] = time.time()
-        _primary_status_cache['is_alive'] = True
+        _update_primary_status(True)
         return jsonify(response), status_code
 
-    # Unreachable due to connection/timeout errors
-    _primary_status_cache['last_check'] = time.time()
-    _primary_status_cache['is_alive'] = False
-    
+    # Unreachable due to connection/timeout errors (or known offline from cache)
+    if primary_alive:
+        # We tried and failed - update cache so subsequent requests skip the attempt
+        _update_primary_status(False)
+
     # Primary is unreachable (connection/timeout error) or marked offline
     if method != 'GET' and return_queued:
         # Queue write operations
@@ -486,10 +492,14 @@ def get_dashboard_data():
 
     def fetch_one(key, endpoint):
         """Fetch one endpoint and fall back to cache on failure."""
-        success, response, _ = forward_to_primary('GET', endpoint)
-        if success:
-            cache_endpoint_data(endpoint, response)
-            return key, response.get('data', {}), True
+        if check_primary_alive():
+            success, response, status_code = forward_to_primary('GET', endpoint)
+            if success:
+                cache_endpoint_data(endpoint, response)
+                return key, response.get('data', {}), True
+            elif status_code is None:
+                # Connection/timeout error - mark primary offline so other requests skip
+                _update_primary_status(False)
         cached = get_cached_endpoint_data(endpoint)
         if cached:
             return key, cached.get('data', {}), False
@@ -506,9 +516,7 @@ def get_dashboard_data():
                 any_primary_success = True
 
     # Update the primary-alive cache based on actual fetch results
-    now = time.time()
-    _primary_status_cache['last_check'] = now
-    _primary_status_cache['is_alive'] = any_primary_success
+    _update_primary_status(any_primary_success)
 
     results['server'] = {
         'primary_api': 'online' if any_primary_success else 'offline',
