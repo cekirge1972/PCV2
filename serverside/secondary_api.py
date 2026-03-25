@@ -201,15 +201,31 @@ def cache_endpoint_data(endpoint: str, data: Dict):
     except sqlite3.OperationalError as e:
         print(f"[ERROR] Failed to cache data: {e}")
 
-def get_cached_endpoint_data(endpoint: str):
-    """Get cached data for an endpoint if not expired."""
+def get_cached_endpoint_data(endpoint: str, allow_expired: bool = False):
+    """Get cached data for an endpoint.
+
+    When allow_expired=False (default), only returns data that has not yet
+    passed its expiry time.  When allow_expired=True, the most-recently
+    cached row is returned even if it has expired — this is used as a
+    last-resort fallback so the dashboard can still display known-good data
+    when the primary API has been offline for longer than the cache TTL.
+    """
     try:
         conn = sqlite3.connect(QUEUE_DB, timeout=10)
         c = conn.cursor()
-        c.execute('''
-            SELECT data FROM data_cache 
-            WHERE endpoint = ? AND expires_at > CURRENT_TIMESTAMP
-        ''', (endpoint,))
+        if allow_expired:
+            # Return the most recently cached row regardless of expiry
+            c.execute('''
+                SELECT data FROM data_cache
+                WHERE endpoint = ?
+                ORDER BY cached_at DESC
+                LIMIT 1
+            ''', (endpoint,))
+        else:
+            c.execute('''
+                SELECT data FROM data_cache 
+                WHERE endpoint = ? AND expires_at > CURRENT_TIMESTAMP
+            ''', (endpoint,))
         row = c.fetchone()
         conn.close()
         if row:
@@ -367,8 +383,10 @@ def proxy_request(method: str, endpoint: str, data: Dict = None, return_queued: 
             "primary_status": "offline"
         }), 202
     elif method == 'GET':
-        # Try to get cached data for read operations
-        cached_data = get_cached_endpoint_data(endpoint)
+        # Try to get cached data for read operations; use allow_expired=True so
+        # that data stored before the cache TTL elapsed is still served when the
+        # primary has been offline longer than one hour.
+        cached_data = get_cached_endpoint_data(endpoint, allow_expired=True)
         if cached_data:
             return jsonify({
                 "status": "success",
@@ -500,7 +518,10 @@ def get_dashboard_data():
             elif status_code is None:
                 # Connection/timeout error - mark primary offline so other requests skip
                 _update_primary_status(False)
-        cached = get_cached_endpoint_data(endpoint)
+        # Use allow_expired=True so that configuration data cached before the
+        # TTL elapsed is still served when the primary has been offline longer
+        # than one hour — a single query covers both fresh and stale rows.
+        cached = get_cached_endpoint_data(endpoint, allow_expired=True)
         if cached:
             return key, cached.get('data', {}), False
         return key, {}, False

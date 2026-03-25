@@ -348,6 +348,20 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        .offline-banner {
+            display: none;
+            background: #fff3cd;
+            color: #856404;
+            border-bottom: 1px solid #ffc107;
+            padding: 10px 20px;
+            text-align: center;
+            font-size: 0.95em;
+        }
+
+        .offline-banner.show {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -356,6 +370,10 @@
             <h1>🛡️ Parental Control Dashboard</h1>
             <p>Manage screen time limits and exceptions</p>
         </header>
+
+        <div id="offlineBanner" class="offline-banner">
+            ⚠️ Primary API is offline — displaying cached data. Changes will be queued and applied when the API comes back online.
+        </div>
 
         <div class="status-bar">
             <div class="status-item">
@@ -683,6 +701,10 @@
                 if (result.status === 'success' && result.data) {
                     const d = result.data;
 
+                    // Show/hide the offline banner based on primary API status
+                    const primaryOffline = d.server && d.server.primary_api === 'offline';
+                    document.getElementById('offlineBanner').classList.toggle('show', primaryOffline);
+
                     // Update status bar
                     if (d.status) {
                         const wrapped = { status: 'success', data: d.status };
@@ -710,6 +732,7 @@
                 }
             } catch (error) {
                 console.warn('Batch endpoint failed, falling back to individual requests:', error);
+                document.getElementById('offlineBanner').classList.add('show');
             } finally {
                 document.getElementById('limitsLoading').classList.remove('show');
                 document.getElementById('exceptionsLoading').classList.remove('show');
