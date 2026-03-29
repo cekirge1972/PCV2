@@ -6,6 +6,7 @@ Receives requests and forwards to primary API, queues if unavailable
 from flask import Flask, request, jsonify
 from datetime import datetime
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -16,8 +17,12 @@ from typing import Dict, Any
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dotenv import load_dotenv
 
 app = Flask(__name__)
+
+# Load environment variables from .env if present
+load_dotenv()
 
 # Enable gzip compression
 try:
@@ -58,7 +63,7 @@ PRIMARY_API_SESSION = create_session()
 log.setLevel(logging.ERROR) """
 
 # Configuration
-PRIMARY_API_URL = 'http://localhost:5000/api'
+PRIMARY_API_URL = os.getenv('PRIMARY_API_URL', 'http://localhost:5000/api')
 QUEUE_DB = 'request_queue.db'
 SYNC_INTERVAL = 10  # seconds
 REQUEST_TIMEOUT = 4.0  # seconds for data requests
